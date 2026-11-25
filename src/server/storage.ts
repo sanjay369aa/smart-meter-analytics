@@ -148,6 +148,10 @@ export class CloudStorageService {
       };
     }
 
+    const simLocation = process.env.VERCEL
+      ? 'ephemeral Vercel /tmp storage (configure AWS S3 environment variables in Vercel Project Settings for durable cloud persistence)'
+      : 'data/cloud_sim/';
+
     return {
       mode: 'local_simulation',
       aws_credentials_configured: creds,
@@ -159,7 +163,7 @@ export class CloudStorageService {
       last_upload_at: lastUploadAt,
       message: creds
         ? 'Running in Local Simulation Mode. Backend AWS credentials are detected and ready if you switch to AWS S3 mode.'
-        : 'Running in Local Simulation Mode (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set on backend). Datasets are persisted locally in data/cloud_sim/.',
+        : `Running in Local Simulation Mode (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY not set on backend). Datasets are persisted in ${simLocation}.`,
     };
   }
 

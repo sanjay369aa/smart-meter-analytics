@@ -210,7 +210,7 @@ export function SettingsView({
             <strong className="text-slate-900">
               {storageStatus?.mode === 'aws_s3' ? 'Live AWS S3' : 'Local Simulation Mode'}
             </strong>
-            . To enable direct AWS S3 uploads in production, configure the following environment variables on the backend server (or in your FastAPI deployment) and restart the server:
+            . To enable direct AWS S3 uploads in production (including on <strong>Vercel</strong>), add the following variables under <strong>Project Settings &rarr; Environment Variables</strong> on your backend host and redeploy:
           </p>
         </div>
 

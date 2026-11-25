@@ -1,0 +1,11 @@
+.playwright-cli
+.aistudio
+.env
+.env.local
+.env.*.local
+node_modules
+dist
+backend
+data/cloud_sim
+src/**/*.test.ts
+*.log
