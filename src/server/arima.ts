@@ -4,8 +4,8 @@ import type {
   HistoricalTrendPoint,
   MeterReading,
   ValidationPoint,
-} from '../types/smartMeter';
-import { formatTimestampShort } from './analytics';
+} from '../types/smartMeter.js';
+import { formatTimestampShort } from './analytics.js';
 
 export const MIN_HOURS_FOR_ARIMA = 48;
 

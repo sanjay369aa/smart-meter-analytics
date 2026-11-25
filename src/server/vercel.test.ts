@@ -104,3 +104,54 @@ test('Vercel serverless handler (api/index.ts) serves all core /api/* endpoints 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('api/index.ts and src/server/*.ts execute cleanly under native Node.js ESM (Vercel runtime simulation)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const esbuild = await import('esbuild');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vercel-esm-test-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ type: 'module' }));
+    fs.symlinkSync(path.resolve(process.cwd(), 'node_modules'), path.join(tmpDir, 'node_modules'));
+
+    esbuild.buildSync({
+      entryPoints: [
+        'api/index.ts',
+        'src/server/app.ts',
+        'src/server/analytics.ts',
+        'src/server/arima.ts',
+        'src/server/sampleData.ts',
+      ],
+      outdir: tmpDir,
+      outbase: '.',
+      format: 'esm',
+      platform: 'node',
+      target: 'node22',
+      bundle: false,
+    });
+
+    const out = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+          process.env.VERCEL = "1";
+          const { default: app } = await import(${JSON.stringify(path.join(tmpDir, 'api/index.js'))});
+          const srv = app.listen(0, "127.0.0.1");
+          await new Promise((r) => srv.once("listening", r));
+          const { port } = srv.address();
+          const res = await fetch(\`http://127.0.0.1:\${port}/api/dashboard\`);
+          const data = await res.json();
+          console.log(JSON.stringify({ status: res.status, records: data.summary.total_records }));
+          await new Promise((r) => srv.close(r));
+        `,
+      ],
+      { encoding: 'utf-8' }
+    );
+    const parsed = JSON.parse(out.trim());
+    assert.equal(parsed.status, 200);
+    assert.ok(parsed.records >= 5040);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

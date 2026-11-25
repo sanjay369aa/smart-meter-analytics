@@ -1,8 +1,8 @@
-import { createApiApp } from '../src/server/app';
+import { createApiApp } from '../src/server/app.js';
 
 /**
  * Vercel Serverless Function entry point.
- * Handles all `/api/*` requests routed via vercel.json without importing Vite dev tooling.
+ * Uses explicit `.js` relative import specifiers required by Node.js native ESM ("type": "module").
  */
 const app = createApiApp({ mountRootFallback: true });
 

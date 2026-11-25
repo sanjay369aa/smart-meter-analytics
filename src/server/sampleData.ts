@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ConsumerType, MeterReading } from '../types/smartMeter';
+import type { ConsumerType, MeterReading } from '../types/smartMeter.js';
 
 interface MeterSpec {
   meter_id: string;

@@ -1,5 +1,4 @@
-import 'dotenv/config';
-import express, { type Express } from 'express';
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import os from 'node:os';
 import path from 'node:path';
 import multer from 'multer';
@@ -8,7 +7,7 @@ import type {
   DashboardPayload,
   ForecastResult,
   MeterReading,
-} from '../types/smartMeter';
+} from '../types/smartMeter.js';
 import {
   buildReport,
   computeAnalytics,
@@ -18,14 +17,14 @@ import {
   getDateRange,
   parseAndCleanCsv,
   reportToCsv,
-} from './analytics';
-import { runArimaForecast } from './arima';
+} from './analytics.js';
+import { runArimaForecast } from './arima.js';
 import {
   ensureSampleCsvOnDisk,
   generateSampleDataset,
   readingsToCsv,
   simulateNextHourReadings,
-} from './sampleData';
+} from './sampleData.js';
 
 /**
  * Returns a writable directory across local Node and Vercel Serverless (where /var/task is read-only).
@@ -56,8 +55,8 @@ class SmartMeterState {
     this.sampleCsvContent = readingsToCsv(this.readings);
     this.lastForecast = runArimaForecast(this.readings, { p: 3, d: 1, q: 1, horizon: 24 });
 
-    // Persist sample CSV locally when not on ephemeral Vercel serverless
-    if (!process.env.VERCEL) {
+    // Persist sample CSV locally when not on ephemeral read-only serverless
+    if (!process.env.VERCEL && !process.cwd().startsWith('/var/task')) {
       try {
         ensureSampleCsvOnDisk(dataDir);
       } catch {
@@ -437,6 +436,18 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
   if (options.mountRootFallback) {
     app.use('/', router);
   }
+
+  // Global Express error handler so serverless errors always return structured JSON
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status =
+      typeof err === 'object' && err !== null && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+        ? (err as { status: number }).status
+        : 500;
+    const message = err instanceof Error ? err.message : 'Internal server error.';
+    if (!res.headersSent) {
+      res.status(status).json({ error: message });
+    }
+  });
 
   return app;
 }

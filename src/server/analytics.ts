@@ -8,7 +8,7 @@ import type {
   ReportPayload,
   ReportRow,
   ForecastResult,
-} from '../types/smartMeter';
+} from '../types/smartMeter.js';
 
 const VALID_CONSUMERS: Record<string, ConsumerType> = {
   residential: 'Residential',
