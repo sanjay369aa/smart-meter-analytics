@@ -1,6 +1,6 @@
 {
   "name": "Smart Meter Analytics",
-  "description": "Smart Meter Electricity Consumption Forecasting and Load Analytics on Cloud — complete monitoring, pattern analysis, peak load detection, ARIMA forecasting, AWS S3 cloud storage, and reporting platform.",
+  "description": "Smart Meter Electricity Consumption Forecasting and Load Analytics on Cloud — complete monitoring, pattern analysis, peak load detection, ARIMA forecasting, Firebase Firestore cloud storage, and reporting platform.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

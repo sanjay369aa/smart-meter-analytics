@@ -8,4 +8,5 @@ dist
 backend
 data/cloud_sim
 src/**/*.test.ts
+firestore.rules.test.ts
 *.log

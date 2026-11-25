@@ -1,0 +1,162 @@
+{
+  "entities": {
+    "SmartMeterDataset": {
+      "title": "SmartMeterDataset",
+      "description": "Metadata record for a cleaned smart meter CSV dataset archived in Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated Firebase UID of the dataset owner."
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._\\-]+$",
+          "description": "Sanitized CSV filename."
+        },
+        "recordCount": {
+          "type": "integer",
+          "description": "Total number of cleaned smart meter readings stored across chunks."
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "UTF-8 byte size of the archived CSV content."
+        },
+        "chunkCount": {
+          "type": "integer",
+          "description": "Number of CSV chunk documents stored under the chunks subcollection."
+        },
+        "totalEnergyKwh": {
+          "type": "number",
+          "description": "Aggregate kWh across all readings in this archived dataset."
+        },
+        "dateRangeStart": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 32,
+          "description": "Earliest UTC date (YYYY-MM-DD) in the dataset."
+        },
+        "dateRangeEnd": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 32,
+          "description": "Latest UTC date (YYYY-MM-DD) in the dataset."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the dataset was archived."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the dataset metadata was last updated."
+        }
+      },
+      "required": [
+        "ownerId",
+        "filename",
+        "recordCount",
+        "sizeBytes",
+        "chunkCount",
+        "totalEnergyKwh",
+        "dateRangeStart",
+        "dateRangeEnd",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DatasetChunk": {
+      "title": "DatasetChunk",
+      "description": "Immutable UTF-8 CSV chunk belonging to a parent SmartMeterDataset document.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated Firebase UID matching the parent dataset owner."
+        },
+        "datasetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent SmartMeterDataset document ID."
+        },
+        "chunkIndex": {
+          "type": "integer",
+          "description": "Zero-based sequential chunk index (0..49)."
+        },
+        "csvContent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 250000,
+          "description": "UTF-8 CSV text slice bounded well below Firestore's 1MB document limit."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the chunk was written."
+        }
+      },
+      "required": ["ownerId", "datasetId", "chunkIndex", "csvContent", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Per-user ARIMA default model preferences synced to Firebase Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated Firebase UID matching the document ID."
+        },
+        "arimaP": {
+          "type": "integer",
+          "description": "Default ARIMA autoregressive order p (1..12)."
+        },
+        "arimaD": {
+          "type": "integer",
+          "description": "Default ARIMA differencing order d (0..2)."
+        },
+        "arimaQ": {
+          "type": "integer",
+          "description": "Default ARIMA moving-average order q (0..4)."
+        },
+        "defaultHorizon": {
+          "type": "integer",
+          "description": "Default forecast horizon in hours (12, 24, or 48)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest preference update."
+        }
+      },
+      "required": ["ownerId", "arimaP", "arimaD", "arimaQ", "defaultHorizon", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/datasets/{datasetId}": {
+      "schema": { "$ref": "#/entities/SmartMeterDataset" },
+      "description": "Owner-scoped smart meter dataset metadata documents."
+    },
+    "/datasets/{datasetId}/chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/DatasetChunk" },
+      "description": "Immutable CSV payload chunks atomically linked to a parent dataset."
+    },
+    "/userSettings/{userId}": {
+      "schema": { "$ref": "#/entities/UserSettings" },
+      "description": "Owner-only ARIMA model preferences keyed by Firebase Auth UID."
+    }
+  }
+}

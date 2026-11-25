@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { Cloud, TrendingUp } from 'lucide-react';
 import { api } from '../api/client';
+import { useFirebase } from '../firebase/FirebaseContext';
 import type { DashboardPayload, NavPage } from '../types/smartMeter';
 import {
   AlertBanner,
@@ -33,6 +34,7 @@ export function DashboardView({
   onNavigate: (page: NavPage) => void;
   onLoadSample: () => Promise<void>;
 }) {
+  const { user, firestoreConnected, datasets } = useFirebase();
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function DashboardView({
 
   return (
     <div className="space-y-6">
-      {/* Status Strip: Cloud Storage + Forecasting Model (Explicitly requested in brief) */}
+      {/* Status Strip: Firebase Cloud Storage + Forecasting Model */}
       <div className="bg-white border border-slate-200 rounded-lg px-4 sm:px-5 py-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-5 gap-y-2">
           <button
@@ -76,10 +78,20 @@ export function DashboardView({
             <Cloud className="w-4 h-4 text-blue-700 shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
             <span>
               <span className="font-medium text-slate-900">Cloud Storage:</span>{' '}
-              <span className={data.storage_status.mode === 'aws_s3' ? 'text-emerald-700 font-medium' : 'text-slate-600'}>
-                {data.storage_status.mode === 'aws_s3'
-                  ? `AWS S3 Connected (${data.storage_status.bucket})`
-                  : `Local Simulation Mode · ${data.storage_status.stored_files_count} archived file(s)`}
+              <span
+                className={
+                  !firestoreConnected
+                    ? 'text-amber-700 font-medium'
+                    : user
+                      ? 'text-emerald-700 font-medium'
+                      : 'text-slate-600'
+                }
+              >
+                {!firestoreConnected
+                  ? 'Firebase Firestore Offline'
+                  : user
+                    ? `Firebase Firestore Connected · ${datasets.length} archived dataset(s)`
+                    : 'Firebase Firestore Ready · Sign in to archive'}
               </span>
             </span>
           </button>

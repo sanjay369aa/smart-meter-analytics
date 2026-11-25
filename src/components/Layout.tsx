@@ -6,6 +6,8 @@ import {
   Database,
   FileSpreadsheet,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Menu,
   RefreshCw,
   Settings,
@@ -13,6 +15,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { useFirebase } from '../firebase/FirebaseContext';
 import type { NavPage } from '../types/smartMeter';
 
 interface NavItem {
@@ -49,6 +52,7 @@ export function Layout({
   children: ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user, authReady, authBusy, signInWithGoogle, signOutUser } = useFirebase();
   const currentNav = NAV_ITEMS.find((n) => n.id === activePage) ?? NAV_ITEMS[0];
 
   const handleSelect = (page: NavPage) => {
@@ -123,9 +127,45 @@ export function Layout({
           })}
         </nav>
 
-        <div className="px-5 py-4 border-t border-white/10 text-xs text-slate-400 leading-relaxed">
-          <div className="font-medium text-slate-200">Grid Load Intelligence</div>
-          <div className="mt-0.5">Cloud Monitoring &amp; ARIMA Forecasting</div>
+        {/* Firebase Account Footer */}
+        <div className="px-4 py-4 border-t border-white/10 text-xs">
+          {!authReady ? (
+            <div className="text-slate-400">Connecting to Firebase...</div>
+          ) : user ? (
+            <div className="space-y-2.5">
+              <div className="min-w-0">
+                <div className="font-medium text-slate-100 truncate">
+                  {user.displayName || 'Signed In Operator'}
+                </div>
+                <div className="text-slate-400 truncate mt-0.5">{user.email}</div>
+              </div>
+              <button
+                type="button"
+                onClick={signOutUser}
+                disabled={authBusy}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-white/10 hover:bg-white/15 rounded-md transition-colors disabled:opacity-50"
+              >
+                <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <div className="text-slate-400 leading-relaxed">
+                <div className="font-medium text-slate-200">Firebase Cloud Sync</div>
+                <div className="mt-0.5">Sign in to archive CSV datasets to Firestore</div>
+              </div>
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                disabled={authBusy}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50"
+              >
+                <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>{authBusy ? 'Signing In...' : 'Sign in with Google'}</span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 

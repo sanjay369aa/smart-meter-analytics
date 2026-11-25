@@ -91,6 +91,15 @@ test('Vercel serverless handler (api/index.ts) serves all core /api/* endpoints 
     assert.equal(sampleCsvRes.status, 200);
     const csvText = await sampleCsvRes.text();
     assert.ok(csvText.startsWith('meter_id,timestamp,consumer_type,energy_kwh,voltage,current,power_factor'));
+
+    const activeCsvRes = await fetch(`${base}/api/dataset/active-csv`);
+    assert.equal(activeCsvRes.status, 200);
+    const activeCsv = await activeCsvRes.json();
+    assert.ok(activeCsv.record_count >= 5040);
+    assert.ok(activeCsv.csv.startsWith('meter_id,timestamp,consumer_type'));
+
+    const removedAwsRes = await fetch(`${base}/api/aws/status`);
+    assert.equal(removedAwsRes.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

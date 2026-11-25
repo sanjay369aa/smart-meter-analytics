@@ -1,7 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from './api/client';
 import { Layout } from './components/Layout';
 import { AlertBanner } from './components/ui/Primitives';
+import { useFirebase } from './firebase/FirebaseContext';
+import { loadUserSettingsFromFirestore } from './firebase/storageService';
 import type { NavPage } from './types/smartMeter';
 import { AnalyticsView } from './views/AnalyticsView';
 import { DashboardView } from './views/DashboardView';
@@ -13,6 +15,7 @@ import { SettingsView } from './views/SettingsView';
 import { StorageView } from './views/StorageView';
 
 export default function App() {
+  const { user, authReady } = useFirebase();
   const [activePage, setActivePage] = useState<NavPage>('dashboard');
   const [refreshTick, setRefreshTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -21,6 +24,25 @@ export default function App() {
     message: string;
   } | null>(null);
   const [defaultOrder, setDefaultOrder] = useState({ p: 3, d: 1, q: 1 });
+  const [defaultHorizon, setDefaultHorizon] = useState<12 | 24 | 48>(24);
+
+  useEffect(() => {
+    if (!authReady || !user) return;
+    let cancelled = false;
+    loadUserSettingsFromFirestore(user.uid)
+      .then((saved) => {
+        if (!cancelled && saved) {
+          setDefaultOrder({ p: saved.arimaP, d: saved.arimaD, q: saved.arimaQ });
+          setDefaultHorizon(saved.defaultHorizon);
+        }
+      })
+      .catch(() => {
+        // Non-fatal on initial sync; Settings view displays explicit feedback if saving fails
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user]);
 
   const triggerRefresh = useCallback(() => {
     setRefreshing(true);
@@ -109,9 +131,12 @@ export default function App() {
 
       {activePage === 'settings' && (
         <SettingsView
-          refreshTick={refreshTick}
           defaultOrder={defaultOrder}
-          onUpdateDefaultOrder={setDefaultOrder}
+          defaultHorizon={defaultHorizon}
+          onUpdateDefaults={(order, horizon) => {
+            setDefaultOrder(order);
+            setDefaultHorizon(horizon);
+          }}
           onDatasetMutated={handleDatasetMutated}
         />
       )}

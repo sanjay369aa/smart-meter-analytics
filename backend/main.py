@@ -6,13 +6,12 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .analytics import compute_analytics, compute_peak_load, filter_dataframe, parse_and_clean_csv
 from .forecasting import run_arima_forecast
-from .storage import CloudStorageService
 
 load_dotenv()
 
@@ -42,20 +41,8 @@ class ForecastRequest(BaseModel):
     consumer_type: Optional[str] = None
 
 
-class StorageConfigRequest(BaseModel):
-    mode: Optional[str] = None
-    bucket: Optional[str] = None
-    region: Optional[str] = None
-    prefix: Optional[str] = None
-
-
-class AwsUploadRequest(BaseModel):
-    filename: Optional[str] = None
-
-
 class AppState:
     def __init__(self) -> None:
-        self.storage = CloudStorageService(DATA_DIR)
         self.df = pd.DataFrame()
         self.dataset_source = "Empty Dataset"
         self.cleaning_report: Optional[Dict[str, Any]] = None
@@ -90,14 +77,13 @@ def df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok", "records": len(state.df)}
+    return {"status": "ok", "cloud_storage": "firebase_firestore", "records": len(state.df)}
 
 
 @app.get("/api/dashboard")
 def get_dashboard() -> Dict[str, Any]:
     analytics = compute_analytics(state.df)
     peak = compute_peak_load(state.df)
-    storage_status = state.storage.get_status()
 
     consumption_over_time = []
     daily_usage = []
@@ -136,7 +122,6 @@ def get_dashboard() -> Dict[str, Any]:
         "daily_usage": daily_usage,
         "actual_vs_predicted": state.last_forecast.get("actual_vs_predicted", [])[-48:],
         "recent_readings": df_to_records(recent),
-        "storage_status": storage_status,
         "forecast_status": {
             "status": state.last_forecast["status"],
             "model_name": state.last_forecast["model_name"],
@@ -170,6 +155,22 @@ def get_meters(
         "total_pages": total_pages,
         "dataset_source": state.dataset_source,
         "cleaning_report": state.cleaning_report,
+    }
+
+
+@app.get("/api/dataset/active-csv")
+def get_active_csv() -> Dict[str, Any]:
+    if state.df.empty:
+        raise HTTPException(status_code=400, detail="Cannot archive an empty dataset.")
+    analytics = compute_analytics(state.df)
+    out = state.df.copy()
+    out["timestamp"] = out["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "csv": out.to_csv(index=False),
+        "record_count": len(out),
+        "total_energy_kwh": analytics["summary"]["total_energy_kwh"],
+        "date_range": analytics["available_date_range"],
+        "dataset_source": state.dataset_source,
     }
 
 
@@ -295,49 +296,3 @@ def get_reports(
         "forecast_rows": state.last_forecast.get("next_24h_forecast", []),
         "forecast_metrics": state.last_forecast.get("metrics"),
     }
-
-
-@app.get("/api/aws/status")
-def aws_status() -> Dict[str, Any]:
-    return state.storage.get_status()
-
-
-@app.post("/api/aws/configure")
-def aws_configure(req: StorageConfigRequest) -> Dict[str, Any]:
-    try:
-        return state.storage.configure(mode=req.mode, bucket=req.bucket, region=req.region, prefix=req.prefix)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/aws/upload")
-def aws_upload(req: AwsUploadRequest) -> Dict[str, Any]:
-    if state.df.empty:
-        raise HTTPException(status_code=400, detail="Cannot upload an empty dataset.")
-    filename = req.filename or f"smart_meter_snapshot_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
-    out = state.df.copy()
-    out["timestamp"] = out["timestamp"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    csv_text = out.to_csv(index=False)
-    try:
-        uploaded = state.storage.upload_csv(filename, csv_text, len(out))
-        return {"message": f'Uploaded "{uploaded["filename"]}".', "file": uploaded, "status": state.storage.get_status()}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/aws/files")
-def aws_files() -> Dict[str, Any]:
-    return {"files": state.storage.list_files(), "status": state.storage.get_status()}
-
-
-@app.get("/api/aws/files/{key}")
-def aws_download_file(key: str) -> Response:
-    try:
-        filename, content = state.storage.retrieve_csv(key)
-    except Exception as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return Response(
-        content=content,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )

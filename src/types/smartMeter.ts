@@ -19,26 +19,34 @@ export interface CleaningReport {
   warnings: string[];
 }
 
-export interface StorageStatus {
-  mode: 'aws_s3' | 'local_simulation';
-  aws_credentials_configured: boolean;
-  bucket: string;
-  region: string;
-  prefix: string;
-  connected: boolean;
-  stored_files_count: number;
-  last_upload_at: string | null;
-  message: string;
+export interface FirebaseDatasetRecord {
+  id: string;
+  ownerId: string;
+  filename: string;
+  recordCount: number;
+  sizeBytes: number;
+  chunkCount: number;
+  totalEnergyKwh: number;
+  dateRangeStart: string;
+  dateRangeEnd: string;
+  createdAtIso: string | null;
+  updatedAtIso: string | null;
 }
 
-export interface StoredDatasetFile {
-  key: string;
-  filename: string;
-  size_bytes: number;
-  uploaded_at: string;
-  storage_mode: 'aws_s3' | 'local_simulation';
-  record_count?: number;
-  bucket: string;
+export interface FirebaseUserSettings {
+  arimaP: number;
+  arimaD: number;
+  arimaQ: number;
+  defaultHorizon: 12 | 24 | 48;
+  updatedAtIso?: string | null;
+}
+
+export interface ActiveDatasetCsvPayload {
+  csv: string;
+  record_count: number;
+  total_energy_kwh: number;
+  date_range: { start: string | null; end: string | null };
+  dataset_source: string;
 }
 
 export interface ForecastPoint {
@@ -109,7 +117,6 @@ export interface DashboardPayload {
   daily_usage: Array<{ date: string; label: string; total_kwh: number; peak_kwh: number }>;
   actual_vs_predicted: ValidationPoint[];
   recent_readings: MeterReading[];
-  storage_status: StorageStatus;
   forecast_status: {
     status: 'trained' | 'insufficient_data' | 'not_trained';
     model_name: string;

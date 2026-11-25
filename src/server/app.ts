@@ -26,13 +26,12 @@ import {
   readingsToCsv,
   simulateNextHourReadings,
 } from './sampleData';
-import { CloudStorageService } from './storage';
 
 /**
  * Returns a writable directory across local Node and Vercel Serverless (where /var/task is read-only).
  */
 export function resolveWritableDataDir(): string {
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  if (process.env.VERCEL || process.cwd().startsWith('/var/task')) {
     return path.join(os.tmpdir(), 'smart-meter-data');
   }
   return path.resolve(process.cwd(), 'data');
@@ -50,11 +49,9 @@ class SmartMeterState {
   public lastCleaningReport: CleaningReport | null = null;
   public lastForecast: ForecastResult;
   public datasetSource: string = '35-Day Sample Dataset';
-  public readonly storage: CloudStorageService;
   public readonly sampleCsvContent: string;
 
   constructor(dataDir: string) {
-    this.storage = new CloudStorageService(dataDir);
     this.readings = generateSampleDataset(35);
     this.sampleCsvContent = readingsToCsv(this.readings);
     this.lastForecast = runArimaForecast(this.readings, { p: 3, d: 1, q: 1, horizon: 24 });
@@ -67,25 +64,6 @@ class SmartMeterState {
         // Safe fallback: /api/sample-csv always serves from memory
       }
     }
-
-    this.seedInitialLocalArchive();
-  }
-
-  private seedInitialLocalArchive(): void {
-    this.storage
-      .listFiles()
-      .then((files) => {
-        if (files.length === 0 && !this.storage.hasAwsCredentials()) {
-          return this.storage.uploadCsv(
-            'baseline_35day_smart_meters.csv',
-            this.sampleCsvContent,
-            this.readings.length
-          );
-        }
-      })
-      .catch(() => {
-        // Non-fatal during cold start
-      });
   }
 
   public setReadings(next: MeterReading[], source: string, report: CleaningReport | null = null): void {
@@ -128,17 +106,17 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
     res.json({
       status: 'ok',
       runtime: process.env.VERCEL ? 'vercel_serverless' : 'node_server',
+      cloud_storage: 'firebase_firestore',
       records: state.readings.length,
     });
   });
 
   // GET /api/dashboard
-  router.get('/dashboard', async (_req, res) => {
+  router.get('/dashboard', (_req, res) => {
     try {
       const readings = state.readings;
       const analytics = computeAnalytics(readings);
       const peakLoad = computePeakLoad(readings);
-      const storageStatus = await state.storage.getStatus();
 
       const hourlyMap = new Map<string, number>();
       for (const r of readings) {
@@ -194,7 +172,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
         daily_usage,
         actual_vs_predicted: state.lastForecast.actual_vs_predicted.slice(-48),
         recent_readings,
-        storage_status: storageStatus,
         forecast_status: {
           status: state.lastForecast.status,
           model_name: state.lastForecast.model_name,
@@ -265,6 +242,25 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
     res.send(csv);
   });
 
+  // GET /api/dataset/active-csv — returns active cleaned dataset CSV + summary for Firebase Firestore archiving
+  router.get('/dataset/active-csv', (_req, res) => {
+    if (state.readings.length === 0) {
+      res.status(400).json({
+        error: 'Cannot archive an empty dataset. Load sample data or upload a CSV first.',
+      });
+      return;
+    }
+    const analytics = computeAnalytics(state.readings);
+    const csv = readingsToCsv(state.readings);
+    res.json({
+      csv,
+      record_count: state.readings.length,
+      total_energy_kwh: analytics.summary.total_energy_kwh,
+      date_range: getDateRange(state.readings),
+      dataset_source: state.datasetSource,
+    });
+  });
+
   // GET /api/sample-csv — streamed directly from memory (safe on read-only Vercel serverless)
   router.get('/sample-csv', (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -309,7 +305,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
     res.json({ message: 'Active dataset cleared.', total_records: 0 });
   });
 
-  // POST /api/upload
+  // POST /api/upload — accepts multipart CSV file upload or JSON { csv, filename } (e.g. from Firebase Firestore archive)
   router.post('/upload', upload.single('file'), (req, res) => {
     try {
       let csvText = '';
@@ -435,100 +431,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="smart_meter_${reportType}_report.csv"`);
     res.send(csv);
-  });
-
-  // GET /api/aws/status
-  router.get('/aws/status', async (_req, res) => {
-    const status = await state.storage.getStatus();
-    res.json(status);
-  });
-
-  // POST /api/aws/configure
-  router.post('/aws/configure', async (req, res) => {
-    try {
-      const { mode, bucket, region, prefix } = req.body ?? {};
-      state.storage.configure({
-        mode: mode === 'aws_s3' ? 'aws_s3' : mode === 'local_simulation' ? 'local_simulation' : undefined,
-        bucket: typeof bucket === 'string' ? bucket : undefined,
-        region: typeof region === 'string' ? region : undefined,
-        prefix: typeof prefix === 'string' ? prefix : undefined,
-      });
-      const status = await state.storage.getStatus();
-      res.json(status);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update storage configuration.';
-      res.status(400).json({ error: message });
-    }
-  });
-
-  // POST /api/aws/upload
-  router.post('/aws/upload', async (req, res) => {
-    try {
-      if (state.readings.length === 0) {
-        res.status(400).json({ error: 'Cannot upload an empty dataset. Load sample data or upload a CSV first.' });
-        return;
-      }
-      const rawName =
-        typeof req.body?.filename === 'string' && req.body.filename.trim()
-          ? req.body.filename.trim()
-          : `smart_meter_snapshot_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
-
-      const csvContent = readingsToCsv(state.readings);
-      const uploaded = await state.storage.uploadCsv(rawName, csvContent, state.readings.length);
-      const status = await state.storage.getStatus();
-      res.json({
-        message:
-          uploaded.storage_mode === 'aws_s3'
-            ? `Uploaded "${uploaded.filename}" to AWS S3 bucket "${uploaded.bucket}".`
-            : `Saved "${uploaded.filename}" in Local Simulation Mode.`,
-        file: uploaded,
-        status,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Cloud upload failed.';
-      res.status(400).json({ error: message });
-    }
-  });
-
-  // GET /api/aws/files
-  router.get('/aws/files', async (_req, res) => {
-    try {
-      const files = await state.storage.listFiles();
-      const status = await state.storage.getStatus();
-      res.json({ files, status });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to list stored files.';
-      res.status(500).json({ error: message });
-    }
-  });
-
-  // GET /api/aws/files/:key
-  router.get('/aws/files/:key', async (req, res) => {
-    try {
-      const { filename, content } = await state.storage.retrieveCsv(req.params.key);
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(content);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to retrieve stored file.';
-      res.status(404).json({ error: message });
-    }
-  });
-
-  // POST /api/aws/load/:key
-  router.post('/aws/load/:key', async (req, res) => {
-    try {
-      const { filename, content } = await state.storage.retrieveCsv(req.params.key);
-      const { readings, report } = parseAndCleanCsv(content);
-      state.setReadings(readings, `Cloud Archive: ${filename}`, report);
-      res.json({
-        message: `Retrieved "${filename}" and loaded ${readings.length.toLocaleString()} records into the active workspace.`,
-        cleaning_report: report,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load stored dataset.';
-      res.status(400).json({ error: message });
-    }
   });
 
   app.use('/api', router);

@@ -1,4 +1,5 @@
 import type {
+  ActiveDatasetCsvPayload,
   AnalyticsPayload,
   CleaningReport,
   DashboardPayload,
@@ -6,8 +7,6 @@ import type {
   MeterReading,
   PeakLoadPayload,
   ReportPayload,
-  StorageStatus,
-  StoredDatasetFile,
 } from '../types/smartMeter';
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -57,6 +56,8 @@ export const api = {
     return requestJson<MetersResponse>(`/api/meters?${qs.toString()}`);
   },
 
+  getActiveCsv: () => requestJson<ActiveDatasetCsvPayload>('/api/dataset/active-csv'),
+
   simulateMeterReading: () =>
     requestJson<{ added_count: number; total_records: number; readings: MeterReading[] }>(
       '/api/meters/simulate',
@@ -71,6 +72,16 @@ export const api = {
       { method: 'POST', body: form }
     );
   },
+
+  loadCsvText: (csv: string, filename: string) =>
+    requestJson<{ message: string; dataset_source: string; cleaning_report: CleaningReport }>(
+      '/api/upload',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv, filename }),
+      }
+    ),
 
   loadSampleDataset: () =>
     requestJson<{ message: string; total_records: number; cleaning_report: CleaningReport }>(
@@ -120,35 +131,6 @@ export const api = {
     if (params.consumer_type && params.consumer_type !== 'All') qs.set('consumer_type', params.consumer_type);
     return requestJson<ReportPayload>(`/api/reports?${qs.toString()}`);
   },
-
-  getAwsStatus: () => requestJson<StorageStatus>('/api/aws/status'),
-
-  getAwsFiles: () => requestJson<{ files: StoredDatasetFile[]; status: StorageStatus }>('/api/aws/files'),
-
-  configureAws: (payload: {
-    mode: 'aws_s3' | 'local_simulation';
-    bucket: string;
-    region: string;
-    prefix: string;
-  }) =>
-    requestJson<StorageStatus>('/api/aws/configure', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
-
-  uploadToAws: (filename?: string) =>
-    requestJson<{ message: string; file: StoredDatasetFile; status: StorageStatus }>('/api/aws/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename }),
-    }),
-
-  loadFromAws: (key: string) =>
-    requestJson<{ message: string; cleaning_report: CleaningReport }>(
-      `/api/aws/load/${encodeURIComponent(key)}`,
-      { method: 'POST' }
-    ),
 };
 
 export function triggerFileDownload(url: string, fallbackName: string): void {
@@ -158,4 +140,11 @@ export function triggerFileDownload(url: string, fallbackName: string): void {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+export function triggerTextDownload(content: string, filename: string, mimeType = 'text/csv;charset=utf-8'): void {
+  const blob = new Blob([content], { type: mimeType });
+  const objectUrl = URL.createObjectURL(blob);
+  triggerFileDownload(objectUrl, filename);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1500);
 }

@@ -1,0 +1,192 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0 / Global Safety Net: Default-deny everything not explicitly allowed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Hardened Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidFilename(name) {
+      return name is string && name.size() >= 1 && name.size() <= 160 && name.matches('^[a-zA-Z0-9._-]+$');
+    }
+
+    // Entity Validation Blueprints (Synchronized with firebase-blueprint.json)
+    function isValidDataset(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'filename',
+          'recordCount',
+          'sizeBytes',
+          'chunkCount',
+          'totalEnergyKwh',
+          'dateRangeStart',
+          'dateRangeEnd',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'filename',
+          'recordCount',
+          'sizeBytes',
+          'chunkCount',
+          'totalEnergyKwh',
+          'dateRangeStart',
+          'dateRangeEnd',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidFilename(data.filename)
+        && data.recordCount is int && data.recordCount >= 1 && data.recordCount <= 200000
+        && data.sizeBytes is int && data.sizeBytes >= 1 && data.sizeBytes <= 50000000
+        && data.chunkCount is int && data.chunkCount >= 1 && data.chunkCount <= 50
+        && data.totalEnergyKwh is number && data.totalEnergyKwh >= 0 && data.totalEnergyKwh <= 1000000000
+        && data.dateRangeStart is string && data.dateRangeStart.size() <= 32
+        && data.dateRangeEnd is string && data.dateRangeEnd.size() <= 32
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChunk(data, datasetId) {
+      return data.keys().hasAll(['ownerId', 'datasetId', 'chunkIndex', 'csvContent', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'datasetId', 'chunkIndex', 'csvContent', 'createdAt'])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.datasetId)
+        && data.datasetId == datasetId
+        && data.chunkIndex is int && data.chunkIndex >= 0 && data.chunkIndex < 50
+        && data.csvContent is string && data.csvContent.size() >= 1 && data.csvContent.size() <= 250000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserSettings(data, userId) {
+      return data.keys().hasAll(['ownerId', 'arimaP', 'arimaD', 'arimaQ', 'defaultHorizon', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'arimaP', 'arimaD', 'arimaQ', 'defaultHorizon', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && data.arimaP is int && data.arimaP >= 1 && data.arimaP <= 12
+        && data.arimaD is int && data.arimaD >= 0 && data.arimaD <= 2
+        && data.arimaQ is int && data.arimaQ >= 0 && data.arimaQ <= 4
+        && data.defaultHorizon is int && data.defaultHorizon in [12, 24, 48]
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection 1: /datasets/{datasetId}
+    match /datasets/{datasetId} {
+      allow get: if isSignedIn()
+        && isValidId(datasetId)
+        && existing().ownerId == request.auth.uid;
+
+      // Pillar 8: Secure List Query — rule enforces ownerId directly without get()
+      allow list: if isSignedIn()
+        && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerified()
+        && isValidId(datasetId)
+        && isValidDataset(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      // Action-Based Update: only renaming filename is permitted; ownerId & createdAt are immutable
+      allow update: if isVerified()
+        && isValidId(datasetId)
+        && isValidDataset(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['filename', 'updatedAt']);
+
+      allow delete: if isVerified()
+        && isValidId(datasetId)
+        && existing().ownerId == request.auth.uid;
+
+      // Collection 2: /datasets/{datasetId}/chunks/{chunkId}
+      match /chunks/{chunkId} {
+        // Pillar 1 Master Gate: verify parent dataset ownership on single-doc read
+        allow get: if isSignedIn()
+          && isValidId(datasetId)
+          && isValidId(chunkId)
+          && existing().ownerId == request.auth.uid
+          && get(/databases/$(database)/documents/datasets/$(datasetId)).data.ownerId == request.auth.uid;
+
+        // Pillar 8: Secure List Query without O(n) get() lookups
+        allow list: if isSignedIn()
+          && isValidId(datasetId)
+          && existing().ownerId == request.auth.uid
+          && existing().datasetId == datasetId;
+
+        // Pillar 1 & 7: Atomicity Guarantee via existsAfter / getAfter parent check
+        allow create: if isVerified()
+          && isValidId(datasetId)
+          && isValidId(chunkId)
+          && isValidChunk(incoming(), datasetId)
+          && incoming().createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/datasets/$(datasetId))
+          && getAfter(/databases/$(database)/documents/datasets/$(datasetId)).data.ownerId == request.auth.uid;
+
+        // Chunks are immutable once archived
+        allow update: if false;
+
+        allow delete: if isVerified()
+          && isValidId(datasetId)
+          && isValidId(chunkId)
+          && existing().ownerId == request.auth.uid;
+      }
+    }
+
+    // Collection 3: /userSettings/{userId}
+    match /userSettings/{userId} {
+      allow get: if isSignedIn()
+        && isValidId(userId)
+        && userId == request.auth.uid;
+
+      allow list: if false;
+
+      allow create: if isVerified()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUserSettings(incoming(), userId)
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidUserSettings(incoming(), userId)
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['arimaP', 'arimaD', 'arimaQ', 'defaultHorizon', 'updatedAt']);
+
+      allow delete: if isVerified()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && existing().ownerId == request.auth.uid;
+    }
+  }
+}
